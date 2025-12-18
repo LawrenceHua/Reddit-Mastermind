@@ -4,7 +4,7 @@ A production-grade Reddit content operations planner that generates authentic, v
 
 ## 🌐 Live Demo
 
-**[https://reddit-mastermind.vercel.app](https://reddit-mastermind.vercel.app)**
+**[https://reddit-mastermind-blue.vercel.app](reddit-mastermind-blue.vercel.app)**
 
 > Login with email magic link (no password required)
 
