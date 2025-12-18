@@ -1,4 +1,10 @@
-export { createOpenAIClient, buildPostGenerationPrompt, buildQualityScoringPrompt } from './openai';
+export {
+  createOpenAIClient,
+  createOpenAIClientJsonObject,
+  buildPostGenerationPrompt,
+  buildQualityScoringPrompt,
+  type OpenAIClientOptions,
+} from './openai';
 export {
   PostCandidateSchema,
   QualityScoreSchema,

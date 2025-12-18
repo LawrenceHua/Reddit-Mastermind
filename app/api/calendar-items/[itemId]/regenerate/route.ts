@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { enqueueJob } from '@/lib/jobs';
 
+interface CalendarItemWithWeek {
+  id: string;
+  calendar_week_id: string;
+  calendar_weeks: {
+    project_id: string;
+    projects: { org_id: string };
+  };
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ itemId: string }> }
@@ -23,7 +32,8 @@ export async function POST(
       .from('calendar_items')
       .select(
         `
-        *,
+        id,
+        calendar_week_id,
         calendar_weeks(
           project_id,
           projects(org_id)
@@ -31,16 +41,13 @@ export async function POST(
       `
       )
       .eq('id', itemId)
-      .single();
+      .single<CalendarItemWithWeek>();
 
     if (error || !item) {
       return NextResponse.json({ error: 'Item not found' }, { status: 404 });
     }
 
-    const weekData = item.calendar_weeks as unknown as {
-      project_id: string;
-      projects: { org_id: string };
-    };
+    const weekData = item.calendar_weeks;
 
     // Create generation run
     const { data: run, error: runError } = await supabase
@@ -51,11 +58,11 @@ export async function POST(
         inputs_json: { calendar_item_id: itemId },
         model_config_json: { model: 'gpt-4o', temperature: 0.7 },
         status: 'pending',
-      })
+      } as any) // Type assertion needed due to Supabase type inference issue
       .select('id')
-      .single();
+      .single() as { data: { id: string } | null; error: any };
 
-    if (runError || !run) {
+    if (runError || !run || !run.id) {
       return NextResponse.json({ error: 'Failed to create run' }, { status: 500 });
     }
 

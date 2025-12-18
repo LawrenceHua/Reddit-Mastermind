@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { writeAuditLog } from '@/lib/audit';
 import { z } from 'zod';
+import type { Tables } from '@/lib/database.types';
 
 const UpdateAssetSchema = z.object({
   title: z.string().optional(),
@@ -63,39 +64,45 @@ export async function PATCH(
     const validatedBody = UpdateAssetSchema.parse(body);
 
     // Get current asset
-    const { data: currentAsset, error: fetchError } = await supabase
+    const { data: currentAssetData, error: fetchError } = await supabase
       .from('content_assets')
       .select('*')
       .eq('id', assetId)
       .single();
 
-    if (fetchError || !currentAsset) {
+    if (fetchError || !currentAssetData) {
       return NextResponse.json({ error: 'Asset not found' }, { status: 404 });
     }
 
+    // Type assertion for current asset
+    const currentAsset = currentAssetData as Tables<'content_assets'>;
+
     // Archive current version
-    await supabase.from('content_assets').update({ status: 'archived' }).eq('id', assetId);
+    await (supabase.from('content_assets') as any).update({ status: 'archived' }).eq('id', assetId);
 
     // Create new version
     const adminClient = createAdminClient();
-    const { data: newAsset, error: createError } = await adminClient
-      .from('content_assets')
-      .insert({
-        calendar_item_id: currentAsset.calendar_item_id,
-        asset_type: currentAsset.asset_type,
-        author_persona_id: currentAsset.author_persona_id,
-        title: validatedBody.title ?? currentAsset.title,
-        body_md: validatedBody.body_md ?? currentAsset.body_md,
-        metadata_json: currentAsset.metadata_json,
-        version: currentAsset.version + 1,
-        status: 'active',
-      })
+    const newAssetInsert = {
+      calendar_item_id: currentAsset.calendar_item_id,
+      asset_type: currentAsset.asset_type as any,
+      author_persona_id: currentAsset.author_persona_id,
+      title: validatedBody.title ?? currentAsset.title,
+      body_md: validatedBody.body_md ?? currentAsset.body_md,
+      metadata_json: currentAsset.metadata_json,
+      version: currentAsset.version + 1,
+      status: 'active' as const,
+    };
+    const { data: newAssetData, error: createError } = await (adminClient
+      .from('content_assets') as any)
+      .insert(newAssetInsert)
       .select()
       .single();
 
-    if (createError || !newAsset) {
+    if (createError || !newAssetData) {
       return NextResponse.json({ error: 'Failed to create new version' }, { status: 500 });
     }
+
+    const newAsset = newAssetData as Tables<'content_assets'>;
 
     // Get org_id for audit log
     const { data: itemData } = await supabase
@@ -105,7 +112,7 @@ export async function PATCH(
       .single();
 
     const projectInfo = (
-      itemData?.calendar_weeks as unknown as { projects: { org_id: string; id: string } }
+      (itemData as any)?.calendar_weeks as { projects: { org_id: string; id: string } }
     )?.projects;
 
     if (projectInfo) {

@@ -10,6 +10,18 @@ const DEFAULT_CONFIG: LLMConfig = {
   retryDelayMs: 1000,
 };
 
+// Models that support JSON Schema structured outputs
+const JSON_SCHEMA_SUPPORTED_MODELS = [
+  'gpt-4o',
+  'gpt-4o-2024-08-06',
+  'gpt-4o-2024-11-20',
+  'gpt-4o-mini',
+  'gpt-4o-mini-2024-07-18',
+  'gpt-4.1',
+  'gpt-4.1-mini',
+  'gpt-4.1-nano',
+];
+
 function generateTraceId(): string {
   return `llm-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 }
@@ -18,19 +30,195 @@ async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export function createOpenAIClient(apiKey: string): LLMClient {
+/**
+ * Convert a Zod schema to JSON Schema format for OpenAI's structured outputs.
+ * This is a simplified converter that handles common Zod types.
+ */
+function zodToJsonSchema(schema: z.ZodTypeAny, definitions: Map<string, object> = new Map()): object {
+  // Handle ZodObject
+  if (schema instanceof z.ZodObject) {
+    const shape = schema.shape;
+    const properties: Record<string, object> = {};
+    const required: string[] = [];
+
+    for (const [key, value] of Object.entries(shape)) {
+      properties[key] = zodToJsonSchema(value as z.ZodTypeAny, definitions);
+      // Check if the field is optional
+      if (!(value instanceof z.ZodOptional)) {
+        required.push(key);
+      }
+    }
+
+    return {
+      type: 'object',
+      properties,
+      required: required.length > 0 ? required : undefined,
+      additionalProperties: false,
+    };
+  }
+
+  // Handle ZodArray
+  if (schema instanceof z.ZodArray) {
+    return {
+      type: 'array',
+      items: zodToJsonSchema(schema.element, definitions),
+    };
+  }
+
+  // Handle ZodString
+  if (schema instanceof z.ZodString) {
+    const result: Record<string, unknown> = { type: 'string' };
+    const checks = schema._def.checks;
+    for (const check of checks) {
+      if (check.kind === 'min') result.minLength = check.value;
+      if (check.kind === 'max') result.maxLength = check.value;
+    }
+    return result;
+  }
+
+  // Handle ZodNumber
+  if (schema instanceof z.ZodNumber) {
+    const result: Record<string, unknown> = { type: 'number' };
+    const checks = schema._def.checks;
+    for (const check of checks) {
+      if (check.kind === 'min') result.minimum = check.value;
+      if (check.kind === 'max') result.maximum = check.value;
+      if (check.kind === 'int') result.type = 'integer';
+    }
+    return result;
+  }
+
+  // Handle ZodBoolean
+  if (schema instanceof z.ZodBoolean) {
+    return { type: 'boolean' };
+  }
+
+  // Handle ZodNullable
+  if (schema instanceof z.ZodNullable) {
+    const inner = zodToJsonSchema(schema.unwrap(), definitions);
+    return {
+      anyOf: [inner, { type: 'null' }],
+    };
+  }
+
+  // Handle ZodOptional
+  if (schema instanceof z.ZodOptional) {
+    return zodToJsonSchema(schema.unwrap(), definitions);
+  }
+
+  // Handle ZodEnum
+  if (schema instanceof z.ZodEnum) {
+    return {
+      type: 'string',
+      enum: schema.options,
+    };
+  }
+
+  // Handle ZodLiteral
+  if (schema instanceof z.ZodLiteral) {
+    const value = schema.value;
+    if (typeof value === 'string') {
+      return { type: 'string', enum: [value] };
+    }
+    if (typeof value === 'number') {
+      return { type: 'number', enum: [value] };
+    }
+    if (typeof value === 'boolean') {
+      return { type: 'boolean', enum: [value] };
+    }
+    return { const: value };
+  }
+
+  // Handle ZodUnion
+  if (schema instanceof z.ZodUnion) {
+    const options = schema.options.map((opt: z.ZodTypeAny) => zodToJsonSchema(opt, definitions));
+    return { anyOf: options };
+  }
+
+  // Handle ZodRecord
+  if (schema instanceof z.ZodRecord) {
+    return {
+      type: 'object',
+      additionalProperties: zodToJsonSchema(schema.valueSchema, definitions),
+    };
+  }
+
+  // Handle ZodNull
+  if (schema instanceof z.ZodNull) {
+    return { type: 'null' };
+  }
+
+  // Fallback for unknown types
+  return { type: 'object' };
+}
+
+/**
+ * Wrap a JSON Schema for use with OpenAI's structured outputs.
+ */
+function createOpenAIJsonSchema(name: string, schema: z.ZodTypeAny): object {
+  return {
+    type: 'json_schema',
+    json_schema: {
+      name,
+      schema: zodToJsonSchema(schema),
+      strict: true,
+    },
+  };
+}
+
+/**
+ * Check if a model supports JSON Schema structured outputs.
+ */
+function supportsJsonSchema(model: string): boolean {
+  return JSON_SCHEMA_SUPPORTED_MODELS.some(
+    (supported) => model === supported || model.startsWith(supported)
+  );
+}
+
+export interface OpenAIClientOptions {
+  /**
+   * Force use of json_object mode even if model supports JSON Schema.
+   * Useful for fallback or debugging.
+   */
+  forceJsonObject?: boolean;
+  /**
+   * Timeout in milliseconds for API requests.
+   */
+  timeoutMs?: number;
+}
+
+export function createOpenAIClient(apiKey: string, clientOptions?: OpenAIClientOptions): LLMClient {
+  const { forceJsonObject = false, timeoutMs = 120000 } = clientOptions ?? {};
+
   async function generateStructured<T>(
     prompt: string,
     schema: z.ZodSchema<T>,
-    options?: Partial<LLMConfig>
+    options?: Partial<LLMConfig> & { schemaName?: string }
   ): Promise<{ data: T; traceId: string }> {
     const config = { ...DEFAULT_CONFIG, ...options };
     const traceId = generateTraceId();
+    const schemaName = options?.schemaName ?? 'response';
+
+    // Determine whether to use JSON Schema or json_object mode
+    const useJsonSchema = !forceJsonObject && supportsJsonSchema(config.model);
 
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt < config.maxRetries; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
       try {
+        // Build response_format based on mode
+        const responseFormat = useJsonSchema
+          ? createOpenAIJsonSchema(schemaName, schema as z.ZodTypeAny)
+          : { type: 'json_object' };
+
+        // System prompt is simpler with JSON Schema mode since OpenAI handles structure
+        const systemContent = useJsonSchema
+          ? 'You are a helpful assistant. Respond with the requested information.'
+          : 'You are a helpful assistant that always responds with valid JSON matching the requested schema. Never include markdown code blocks or any text outside the JSON object.';
+
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -45,16 +233,19 @@ export function createOpenAIClient(apiKey: string): LLMClient {
             messages: [
               {
                 role: 'system',
-                content: `You are a helpful assistant that always responds with valid JSON matching the requested schema. Never include markdown code blocks or any text outside the JSON object.`,
+                content: systemContent,
               },
               {
                 role: 'user',
                 content: prompt,
               },
             ],
-            response_format: { type: 'json_object' },
+            response_format: responseFormat,
           }),
+          signal: controller.signal,
         });
+
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
           const errorBody = await response.text();
@@ -68,11 +259,31 @@ export function createOpenAIClient(apiKey: string): LLMClient {
             throw new LLMError(`OpenAI server error: ${errorBody}`, 'SERVER_ERROR', traceId, true);
           }
 
+          // If JSON Schema mode fails due to unsupported model, fall back to json_object
+          if (
+            useJsonSchema &&
+            response.status === 400 &&
+            errorBody.includes('json_schema')
+          ) {
+            throw new LLMError(
+              'JSON Schema mode not supported, will retry with json_object',
+              'FALLBACK_JSON_OBJECT',
+              traceId,
+              true
+            );
+          }
+
           throw new LLMError(`OpenAI API error: ${errorBody}`, 'API_ERROR', traceId, false);
         }
 
         const data = await response.json();
         const content = data.choices?.[0]?.message?.content;
+        const refusal = data.choices?.[0]?.message?.refusal;
+
+        // Handle refusals (safety filtering)
+        if (refusal) {
+          throw new LLMError(`Model refused request: ${refusal}`, 'REFUSAL', traceId, false);
+        }
 
         if (!content) {
           throw new LLMError('No content in response', 'EMPTY_RESPONSE', traceId, true);
@@ -91,7 +302,7 @@ export function createOpenAIClient(apiKey: string): LLMClient {
           );
         }
 
-        // Validate against schema
+        // Validate against Zod schema (belt and suspenders with JSON Schema mode)
         const result = schema.safeParse(parsed);
         if (!result.success) {
           throw new ValidationError(
@@ -101,17 +312,33 @@ export function createOpenAIClient(apiKey: string): LLMClient {
           );
         }
 
+        // Log usage info for observability
+        const usage = data.usage;
+        if (usage) {
+          console.log(
+            `[LLM] ${traceId} | model=${config.model} | mode=${useJsonSchema ? 'json_schema' : 'json_object'} | prompt_tokens=${usage.prompt_tokens} | completion_tokens=${usage.completion_tokens}`
+          );
+        }
+
         return { data: result.data, traceId };
       } catch (error) {
+        clearTimeout(timeoutId);
         lastError = error as Error;
+
+        // Handle abort (timeout)
+        if (error instanceof Error && error.name === 'AbortError') {
+          lastError = new LLMError('Request timed out', 'TIMEOUT', traceId, true);
+        }
 
         // Don't retry non-retryable errors
         if (error instanceof LLMError && !error.retryable) {
           throw error;
         }
 
-        // Calculate delay with exponential backoff
-        const delay = config.retryDelayMs * Math.pow(2, attempt);
+        // Calculate delay with exponential backoff and jitter
+        const baseDelay = config.retryDelayMs * Math.pow(2, attempt);
+        const jitter = Math.random() * 0.2 * baseDelay; // Add up to 20% jitter
+        const delay = baseDelay + jitter;
 
         if (error instanceof RateLimitError && error.retryAfter) {
           await sleep(error.retryAfter * 1000);
@@ -125,6 +352,14 @@ export function createOpenAIClient(apiKey: string): LLMClient {
   }
 
   return { generateStructured };
+}
+
+/**
+ * Create an OpenAI client that always uses json_object mode (fallback implementation).
+ * Useful when JSON Schema mode is having issues or for compatibility with older models.
+ */
+export function createOpenAIClientJsonObject(apiKey: string): LLMClient {
+  return createOpenAIClient(apiKey, { forceJsonObject: true });
 }
 
 // Prompt builders

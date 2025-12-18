@@ -53,26 +53,47 @@ export default function SignupPage() {
     });
 
     if (authError) {
-      setError(authError.message);
+      // Handle specific error messages
+      if (authError.message.toLowerCase().includes('already registered') || 
+          authError.message.toLowerCase().includes('already exists')) {
+        setError('An account with this email already exists. Please sign in instead.');
+      } else {
+        setError(authError.message);
+      }
       setIsLoading(false);
       return;
     }
 
-    // If email confirmation is disabled, create org immediately
-    if (authData.user && !authData.user.email_confirmed_at) {
+    // Check if user already exists (Supabase returns user with empty identities for existing users)
+    if (authData.user && authData.user.identities && authData.user.identities.length === 0) {
+      setError('An account with this email already exists. Please sign in instead.');
+      setIsLoading(false);
+      return;
+    }
+
+    // If email confirmation is required (user exists but not confirmed yet)
+    if (authData.user && !authData.session) {
       setSuccess(true);
       setIsLoading(false);
       return;
     }
 
-    // If confirmed immediately, create org and redirect
-    if (authData.user) {
-      const { error: orgError } = await supabase.from('orgs').insert({
-        name: orgName,
-      });
+    // If confirmed immediately (email confirmation disabled), create org and redirect
+    if (authData.user && authData.session) {
+      // Create org directly
+      const { data: newOrg, error: orgError } = await (supabase
+        .from('orgs') as any)
+        .insert({ name: orgName.trim() || 'My Organization', created_by: authData.user.id })
+        .select('id')
+        .single();
 
-      if (orgError) {
-        console.error('Error creating org:', orgError);
+      if (!orgError && newOrg) {
+        // Create membership
+        await (supabase.from('org_members') as any).insert({
+          org_id: newOrg.id,
+          user_id: authData.user.id,
+          role: 'admin',
+        });
       }
 
       router.push('/dashboard');
@@ -123,7 +144,14 @@ export default function SignupPage() {
           <form onSubmit={handleSignup} className="space-y-4">
             {error && (
               <Alert variant="destructive" className="border-red-900 bg-red-950/50">
-                <AlertDescription>{error}</AlertDescription>
+                <AlertDescription>
+                  {error}
+                  {error.includes('already exists') && (
+                    <Link href="/login" className="ml-2 underline hover:text-red-300">
+                      Sign in here
+                    </Link>
+                  )}
+                </AlertDescription>
               </Alert>
             )}
 

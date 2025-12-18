@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
@@ -47,7 +48,7 @@ export async function GET(
 
     // Get job status if running
     let jobInfo = null;
-    if (run.status === 'pending' || run.status === 'running') {
+    if ((run as any).status === 'pending' || (run as any).status === 'running') {
       const { data: job } = await supabase
         .from('jobs')
         .select('status, attempts, last_error, created_at')
@@ -59,8 +60,12 @@ export async function GET(
       jobInfo = job;
     }
 
+    // Map status for UI compatibility (DB uses 'completed', UI expects 'succeeded')
+    const status = (run as any).status === 'completed' ? 'succeeded' : (run as any).status;
+
     return NextResponse.json({
-      ...run,
+      ...(run as any),
+      status,
       calendar_week: week,
       job: jobInfo,
     });

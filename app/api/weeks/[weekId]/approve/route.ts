@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { writeAuditLog } from '@/lib/audit';
@@ -37,7 +38,7 @@ export async function POST(
     }
 
     // Check for critical flags
-    const items = week.calendar_items as unknown as Array<{ risk_flags_json: string[] }>;
+    const items = (week as any).calendar_items as Array<{ risk_flags_json: string[] }>;
     const hasCritical = items.some((item) => hasCriticalFlags(item.risk_flags_json || []));
 
     if (hasCritical) {
@@ -48,8 +49,8 @@ export async function POST(
     }
 
     // Update week status
-    const { error: updateError } = await supabase
-      .from('calendar_weeks')
+    const { error: updateError } = await (supabase
+      .from('calendar_weeks') as any)
       .update({ status: 'approved' })
       .eq('id', weekId);
 
@@ -58,12 +59,12 @@ export async function POST(
     }
 
     // Update all items to approved
-    await supabase
-      .from('calendar_items')
+    await (supabase
+      .from('calendar_items') as any)
       .update({ status: 'approved' })
       .eq('calendar_week_id', weekId);
 
-    const projectData = week.projects as unknown as { id: string; org_id: string };
+    const projectData = (week as any).projects as { id: string; org_id: string };
 
     // Write audit log
     await writeAuditLog({
@@ -73,7 +74,7 @@ export async function POST(
       action: 'approve',
       entityType: 'calendar_week',
       entityId: weekId,
-      diff: { previousStatus: week.status, newStatus: 'approved' },
+      diff: { previousStatus: (week as any).status, newStatus: 'approved' },
     });
 
     return NextResponse.json({ status: 'approved' });

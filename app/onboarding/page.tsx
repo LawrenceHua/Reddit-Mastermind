@@ -39,11 +39,23 @@ export default function OnboardingPage() {
       return;
     }
 
-    // Create org
-    const { data: org, error: orgError } = await supabase
-      .from('orgs')
-      .insert({ name: orgName.trim() })
-      .select()
+    // Check if user already has an org
+    const { data: existingMemberships } = await supabase
+      .from('org_members')
+      .select('org_id')
+      .eq('user_id', user.id);
+
+    if (existingMemberships && existingMemberships.length > 0) {
+      // Already has an org, redirect to dashboard
+      router.push('/dashboard');
+      return;
+    }
+
+    // Create org directly
+    const { data: newOrg, error: orgError } = await (supabase
+      .from('orgs') as any)
+      .insert({ name: orgName.trim(), created_by: user.id })
+      .select('id')
       .single();
 
     if (orgError) {
@@ -52,12 +64,20 @@ export default function OnboardingPage() {
       return;
     }
 
-    // Add user as admin
-    const { error: memberError } = await supabase.from('org_members').insert({
-      org_id: org.id,
-      user_id: user.id,
-      role: 'admin',
-    });
+    if (!newOrg) {
+      setError('Failed to create organization');
+      setIsLoading(false);
+      return;
+    }
+
+    // Create membership
+    const { error: memberError } = await (supabase
+      .from('org_members') as any)
+      .insert({
+        org_id: newOrg.id,
+        user_id: user.id,
+        role: 'admin',
+      });
 
     if (memberError) {
       setError(memberError.message);

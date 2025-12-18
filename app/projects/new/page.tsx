@@ -41,23 +41,25 @@ export default function NewProjectPage() {
       return;
     }
 
-    const { data: membership, error: membershipError } = await supabase
+    // Get user's org memberships (avoid .single() to prevent errors)
+    const { data: memberships } = await supabase
       .from('org_members')
       .select('org_id')
-      .eq('user_id', user.id)
-      .single();
+      .eq('user_id', user.id);
 
-    if (membershipError || !membership) {
-      setError('Could not find your organization');
-      setIsLoading(false);
+    // If no memberships, redirect to onboarding to create org
+    if (!memberships || memberships.length === 0) {
+      router.push('/onboarding');
       return;
     }
 
+    const membership = memberships[0];
+
     // Create the project
-    const { data: project, error: projectError } = await supabase
-      .from('projects')
+    const { data: project, error: projectError } = await (supabase
+      .from('projects') as any)
       .insert({
-        org_id: membership.org_id,
+        org_id: (membership as any).org_id,
         name: name.trim(),
         company_profile_json: {},
         brand_voice_json: {},
@@ -74,7 +76,7 @@ export default function NewProjectPage() {
     }
 
     // Redirect to setup wizard
-    router.push(`/projects/${project.id}/setup`);
+    router.push(`/projects/${(project as any).id}/setup`);
   };
 
   return (
@@ -87,8 +89,8 @@ export default function NewProjectPage() {
             </div>
             <CardTitle>Create a new project</CardTitle>
             <CardDescription>
-              Start by giving your project a name. You&apos;ll configure everything else in the
-              setup wizard.
+              Each project represents a Reddit content campaign. After this, you&apos;ll set up
+              your company info, personas, and target subreddits.
             </CardDescription>
           </CardHeader>
           <CardContent>

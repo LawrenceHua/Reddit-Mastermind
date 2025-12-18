@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { exportWeekToCSV, exportWeekToJSON } from '@/lib/export';
@@ -40,7 +41,7 @@ export async function GET(
 
     // Enrich items with related data
     const enrichedItems = await Promise.all(
-      (items || []).map(async (item) => {
+      (items || []).map(async (item: any) => {
         const { data: subreddit } = await supabase
           .from('subreddits')
           .select('name')
@@ -70,9 +71,9 @@ export async function GET(
     );
 
     const weekData = {
-      id: week.id,
-      week_start_date: week.week_start_date,
-      status: week.status,
+      id: (week as any).id,
+      week_start_date: (week as any).week_start_date,
+      status: (week as any).status,
       calendar_items: enrichedItems,
     };
 
@@ -81,7 +82,7 @@ export async function GET(
       return new NextResponse(csv, {
         headers: {
           'Content-Type': 'text/csv',
-          'Content-Disposition': `attachment; filename="week-${week.week_start_date}.csv"`,
+          'Content-Disposition': `attachment; filename="week-${(week as any).week_start_date}.csv"`,
         },
       });
     } else {
@@ -89,7 +90,7 @@ export async function GET(
       return new NextResponse(JSON.stringify(json, null, 2), {
         headers: {
           'Content-Type': 'application/json',
-          'Content-Disposition': `attachment; filename="week-${week.week_start_date}.json"`,
+          'Content-Disposition': `attachment; filename="week-${(week as any).week_start_date}.json"`,
         },
       });
     }

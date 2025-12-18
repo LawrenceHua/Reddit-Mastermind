@@ -28,7 +28,7 @@ export function buildPostSlots(
   const rng = createSeededRandom(effectiveSeed);
 
   // Ensure week starts on Monday (1) for business week focus
-  const weekStart = startOfWeek(weekStartDate, { weekStartsOn: 1 });
+  const weekStart = startOfWeek(weekStartDate, { weekStartsOn: 0 });
 
   // Available days: Monday-Friday (0-4 relative to week start)
   // Can extend to include weekend if needed

@@ -16,7 +16,7 @@ async function claimJob(config: WorkerConfig): Promise<Job | null> {
   const supabase = createAdminClient();
 
   // Use raw SQL for the SKIP LOCKED pattern
-  const { data, error } = await supabase.rpc('claim_next_job', {
+  const { data, error } = await (supabase.rpc as any)('claim_next_job', {
     worker_id: config.workerId,
     lock_timeout_ms: config.lockTimeoutMs,
   });
@@ -27,7 +27,7 @@ async function claimJob(config: WorkerConfig): Promise<Job | null> {
   }
 
   // Function returns an array, get first item or null
-  if (!data || !Array.isArray(data) || data.length === 0) {
+  if (!data || !Array.isArray(data) || (data as any[]).length === 0) {
     return null;
   }
 
@@ -64,7 +64,7 @@ async function updateJobStatus(
   };
 
   if (status === 'running') {
-    updates.attempts = (currentJob?.attempts ?? 0) + 1;
+    updates.attempts = ((currentJob as any)?.attempts ?? 0) + 1;
   }
 
   if (status === 'succeeded' || status === 'failed') {
@@ -76,7 +76,7 @@ async function updateJobStatus(
     updates.last_error = error;
   }
 
-  await supabase.from('jobs').update(updates).eq('id', jobId);
+  await (supabase.from('jobs') as any).update(updates).eq('id', jobId);
 }
 
 /**
@@ -157,8 +157,8 @@ export async function enqueueJob(
 ): Promise<string> {
   const supabase = createAdminClient();
 
-  const { data, error } = await supabase
-    .from('jobs')
+  const { data, error } = await (supabase
+    .from('jobs') as any)
     .insert({
       org_id: orgId,
       project_id: projectId,
@@ -174,5 +174,5 @@ export async function enqueueJob(
     throw new Error(`Failed to enqueue job: ${error.message}`);
   }
 
-  return data.id;
+  return (data as { id: string }).id;
 }

@@ -11,6 +11,7 @@ import {
   Sparkles,
   ClipboardList,
   BarChart3,
+  Brain,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -51,6 +52,11 @@ const projectNavItems: NavItem[] = [
     title: 'Generation Runs',
     href: '/runs',
     icon: Sparkles,
+  },
+  {
+    title: 'Learning',
+    href: '/learning',
+    icon: Brain,
   },
   {
     title: 'Analytics',

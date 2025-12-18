@@ -3,6 +3,11 @@ import { buildPostSlots, assignSubreddits, assignPersonas } from '@/lib/planner'
 import { generateCandidatesForSlot, DEFAULT_GENERATION_CONFIG } from '@/lib/generation';
 import type { JobResult, GenerateWeekPayload, GenerateItemPayload } from './types';
 import type { Subreddit, Persona, TopicSeed, SlotConstraints } from '@/lib/planner';
+import type { Tables } from '@/lib/database.types';
+
+type PersonaRow = Tables<'personas'>;
+type SubredditRow = Tables<'subreddits'>;
+type TopicSeedRow = Tables<'topic_seeds'>;
 
 /**
  * Process a generate_week job
@@ -12,8 +17,8 @@ export async function processGenerateWeekJob(payload: GenerateWeekPayload): Prom
 
   try {
     // Update generation run to running
-    await supabase
-      .from('generation_runs')
+    await (supabase
+      .from('generation_runs') as any)
       .update({ status: 'running', started_at: new Date().toISOString() })
       .eq('id', payload.generation_run_id);
 
@@ -28,7 +33,7 @@ export async function processGenerateWeekJob(payload: GenerateWeekPayload): Prom
       throw new Error(`Calendar week not found: ${weekError?.message}`);
     }
 
-    const project = week.projects as unknown as {
+    const project = (week as any).projects as {
       id: string;
       org_id: string;
       company_profile_json: Record<string, unknown>;
@@ -62,7 +67,7 @@ export async function processGenerateWeekJob(payload: GenerateWeekPayload): Prom
     }
 
     // Transform to planner types
-    const personas: Persona[] = personasData.map((p) => ({
+    const personas: Persona[] = personasData.map((p: PersonaRow) => ({
       id: p.id,
       name: p.name,
       bio: p.bio,
@@ -71,7 +76,7 @@ export async function processGenerateWeekJob(payload: GenerateWeekPayload): Prom
       disclosureRequired: (p.disclosure_rules_json as Record<string, unknown>)?.required === true,
     }));
 
-    const subreddits: Subreddit[] = subredditsData.map((s) => ({
+    const subreddits: Subreddit[] = subredditsData.map((s: SubredditRow) => ({
       id: s.id,
       name: s.name,
       riskLevel: s.risk_level,
@@ -80,7 +85,7 @@ export async function processGenerateWeekJob(payload: GenerateWeekPayload): Prom
       rulesText: s.rules_text,
     }));
 
-    const topicSeeds: TopicSeed[] = topicSeedsData.map((t) => ({
+    const topicSeeds: TopicSeed[] = topicSeedsData.map((t: TopicSeedRow) => ({
       id: t.id,
       seedType: t.seed_type,
       text: t.text,
@@ -153,8 +158,8 @@ export async function processGenerateWeekJob(payload: GenerateWeekPayload): Prom
 
         if (result.selectedCandidate) {
           // Create calendar item
-          const { data: calendarItem } = await supabase
-            .from('calendar_items')
+          const { data: calendarItemData } = await (supabase
+            .from('calendar_items') as any)
             .insert({
               calendar_week_id: payload.calendar_week_id,
               scheduled_at: slot.scheduledAt.toISOString(),
@@ -167,10 +172,12 @@ export async function processGenerateWeekJob(payload: GenerateWeekPayload): Prom
             .select('id')
             .single();
 
+          const calendarItem = calendarItemData as { id: string } | null;
+
           if (calendarItem) {
             // Create content asset
-            const { data: asset } = await supabase
-              .from('content_assets')
+            const { data: assetData } = await (supabase
+              .from('content_assets') as any)
               .insert({
                 calendar_item_id: calendarItem.id,
                 asset_type: 'post',
@@ -187,9 +194,11 @@ export async function processGenerateWeekJob(payload: GenerateWeekPayload): Prom
               .select('id')
               .single();
 
+            const asset = assetData as { id: string } | null;
+
             // Create quality score
             if (asset) {
-              await supabase.from('quality_scores').insert({
+              await (supabase.from('quality_scores') as any).insert({
                 asset_id: asset.id,
                 dimensions_json: {
                   subreddit_fit: result.selectedCandidate.score.subreddit_fit,
@@ -206,7 +215,7 @@ export async function processGenerateWeekJob(payload: GenerateWeekPayload): Prom
 
             // Create follow-up comment if present
             if (result.selectedCandidate.candidate.op_followup_comment && calendarItem) {
-              await supabase.from('content_assets').insert({
+              await (supabase.from('content_assets') as any).insert({
                 calendar_item_id: calendarItem.id,
                 asset_type: 'followup',
                 author_persona_id: slot.personaId,
@@ -230,8 +239,8 @@ export async function processGenerateWeekJob(payload: GenerateWeekPayload): Prom
     }
 
     // Update generation run to succeeded
-    await supabase
-      .from('generation_runs')
+    await (supabase
+      .from('generation_runs') as any)
       .update({
         status: errorCount === withPersonas.slots.length ? 'failed' : 'succeeded',
         finished_at: new Date().toISOString(),
@@ -250,8 +259,8 @@ export async function processGenerateWeekJob(payload: GenerateWeekPayload): Prom
     const message = error instanceof Error ? error.message : 'Unknown error';
 
     // Update generation run to failed
-    await supabase
-      .from('generation_runs')
+    await (supabase
+      .from('generation_runs') as any)
       .update({
         status: 'failed',
         finished_at: new Date().toISOString(),

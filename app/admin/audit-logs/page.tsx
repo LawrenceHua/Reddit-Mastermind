@@ -4,6 +4,7 @@ import { AppShell } from '@/components/shell';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { formatDistanceToNow } from 'date-fns';
+import type { OrgRole } from '@/lib/database.types';
 
 interface AuditLog {
   id: string;
@@ -39,7 +40,7 @@ export default async function AuditLogsPage() {
     .from('org_members')
     .select('org_id, role')
     .eq('user_id', user.id)
-    .single();
+    .single<{ org_id: string; role: OrgRole }>();
 
   if (!membership || membership.role !== 'admin') {
     redirect('/dashboard');

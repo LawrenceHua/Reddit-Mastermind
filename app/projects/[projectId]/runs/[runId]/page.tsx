@@ -12,7 +12,7 @@ import { Loader2, CheckCircle, XCircle, Clock, ArrowRight, RefreshCw } from 'luc
 interface RunData {
   id: string;
   run_type: string;
-  status: 'pending' | 'running' | 'succeeded' | 'failed';
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'completed';
   started_at: string | null;
   finished_at: string | null;
   error: string | null;
@@ -29,7 +29,7 @@ interface RunData {
   };
 }
 
-const STATUS_CONFIG = {
+const STATUS_CONFIG: Record<string, { icon: typeof Clock; color: string; bgColor: string; label: string }> = {
   pending: {
     icon: Clock,
     color: 'text-yellow-500',
@@ -47,6 +47,12 @@ const STATUS_CONFIG = {
     color: 'text-green-500',
     bgColor: 'bg-green-500/10',
     label: 'Succeeded',
+  },
+  completed: {
+    icon: CheckCircle,
+    color: 'text-green-500',
+    bgColor: 'bg-green-500/10',
+    label: 'Completed',
   },
   failed: {
     icon: XCircle,
@@ -68,32 +74,54 @@ export default function RunPage({
 
   // Poll for run status
   useEffect(() => {
+    let isMounted = true;
+    let pollInterval: NodeJS.Timeout | null = null;
+    let shouldPoll = true;
+
     async function fetchRun() {
+      if (!shouldPoll) return;
+      
       try {
         const response = await fetch(`/api/runs/${runId}`);
         const data = await response.json();
 
-        if (response.ok) {
+        if (response.ok && isMounted) {
           setRun(data);
+          
+          // Stop polling if run is complete
+          const isComplete = data.status === 'succeeded' || data.status === 'failed' || data.status === 'completed';
+          if (isComplete) {
+            shouldPoll = false;
+            if (pollInterval) {
+              clearInterval(pollInterval);
+              pollInterval = null;
+            }
+            console.log('[Run] Status complete:', data.status);
+          }
         }
       } catch (error) {
         console.error('Failed to fetch run:', error);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     }
 
+    // Initial fetch
     fetchRun();
 
-    // Poll every 2 seconds while running
-    const interval = setInterval(() => {
-      if (run?.status === 'pending' || run?.status === 'running') {
+    // Only start polling if we don't already know the status
+    pollInterval = setInterval(() => {
+      if (shouldPoll) {
         fetchRun();
       }
-    }, 2000);
+    }, 3000);
 
-    return () => clearInterval(interval);
-  }, [runId, run?.status]);
+    return () => {
+      isMounted = false;
+      shouldPoll = false;
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  }, [runId]);
 
   if (loading) {
     return (
@@ -118,9 +146,9 @@ export default function RunPage({
     );
   }
 
-  const config = STATUS_CONFIG[run.status];
+  const config = STATUS_CONFIG[run.status] || STATUS_CONFIG.pending;
   const StatusIcon = config.icon;
-  const isComplete = run.status === 'succeeded' || run.status === 'failed';
+  const isComplete = run.status === 'succeeded' || run.status === 'failed' || run.status === 'completed';
 
   return (
     <AppShell title="Generation Run" projectId={projectId}>
@@ -146,14 +174,27 @@ export default function RunPage({
                 />
               </div>
               <h3 className="text-xl font-semibold mb-2">{config.label}</h3>
-              {run.status === 'running' && (
-                <p className="text-zinc-500">This may take a few minutes...</p>
+              {run.status === 'pending' && (
+                <p className="text-zinc-500 text-center">Preparing to generate content...</p>
               )}
-              {run.status === 'succeeded' && (
-                <p className="text-zinc-500">Content has been generated successfully</p>
+              {run.status === 'running' && (
+                <p className="text-zinc-500 text-center">
+                  Creating posts and comment threads with AI. This takes 20-30 seconds.
+                </p>
+              )}
+              {(run.status === 'succeeded' || run.status === 'completed') && (
+                <div className="text-center">
+                  <p className="text-green-600 font-medium mb-1">✨ Content generated successfully!</p>
+                  <p className="text-zinc-500 text-sm">
+                    Click below to review, edit, and copy your posts.
+                  </p>
+                </div>
               )}
               {run.status === 'failed' && (
-                <p className="text-red-500">{run.error || 'An error occurred'}</p>
+                <div className="text-center">
+                  <p className="text-red-500 mb-1">{run.error || 'An error occurred during generation'}</p>
+                  <p className="text-zinc-500 text-sm">Try again or check your setup configuration.</p>
+                </div>
               )}
             </div>
 
@@ -190,34 +231,39 @@ export default function RunPage({
 
             {/* Actions */}
             {isComplete && (
-              <div className="flex gap-3 pt-4">
-                {run.status === 'succeeded' && run.calendar_week && (
-                  <Button
-                    className="flex-1"
-                    onClick={() =>
-                      router.push(`/projects/${projectId}/weeks/${run.calendar_week!.id}`)
-                    }
-                  >
-                    View Generated Content
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
+              <div className="space-y-4 pt-4">
+                {(run.status === 'succeeded' || run.status === 'completed') && run.calendar_week && (
+                  <>
+                    <Button
+                      className="w-full bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700"
+                      size="lg"
+                      onClick={() =>
+                        router.push(`/projects/${projectId}/weeks/${run.calendar_week!.id}`)
+                      }
+                    >
+                      Review & Edit Your Content
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Button>
+                    <p className="text-xs text-center text-zinc-500">
+                      Next: Review posts, make edits, then copy to post on Reddit
+                    </p>
+                  </>
                 )}
                 {run.status === 'failed' && (
-                  <Button
-                    variant="outline"
-                    className="flex-1"
-                    onClick={() => router.push(`/projects/${projectId}/calendar`)}
-                  >
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Try Again
-                  </Button>
+                  <>
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => router.push(`/projects/${projectId}/calendar`)}
+                    >
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Back to Calendar to Try Again
+                    </Button>
+                    <p className="text-xs text-center text-zinc-500">
+                      Check your setup and try generating again
+                    </p>
+                  </>
                 )}
-                <Button
-                  variant="outline"
-                  onClick={() => router.push(`/projects/${projectId}/calendar`)}
-                >
-                  Back to Calendar
-                </Button>
               </div>
             )}
           </CardContent>

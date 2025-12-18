@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
@@ -39,7 +40,7 @@ export async function GET(
         calendar_items(
           *,
           subreddits(id, name, risk_level),
-          personas:personas!calendar_items_primary_persona_id_fkey(id, name, tone),
+          personas(id, name, tone),
           content_assets(
             *,
             quality_scores(*)
@@ -85,8 +86,8 @@ export async function PATCH(
       return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
     }
 
-    const { data: week, error } = await supabase
-      .from('calendar_weeks')
+    const { data: week, error } = await (supabase
+      .from('calendar_weeks') as any)
       .update({
         status: body.status,
         updated_at: new Date().toISOString(),

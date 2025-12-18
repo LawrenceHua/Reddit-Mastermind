@@ -17,7 +17,7 @@ export interface AuditLogEntry {
 export async function writeAuditLog(entry: AuditLogEntry): Promise<void> {
   const supabase = createAdminClient();
 
-  await supabase.from('audit_logs').insert({
+  await (supabase.from('audit_logs') as any).insert({
     org_id: entry.orgId,
     project_id: entry.projectId ?? null,
     actor_user_id: entry.actorUserId,

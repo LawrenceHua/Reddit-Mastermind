@@ -7,6 +7,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Plus, FileText, Calendar, ArrowRight } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import type { Tables } from '@/lib/database.types';
+
+type Project = Tables<'projects'>;
 
 export default async function ProjectsPage() {
   const supabase = await createClient();
@@ -19,22 +22,25 @@ export default async function ProjectsPage() {
     redirect('/login');
   }
 
-  // Get user's org membership
-  const { data: membership } = await supabase
+  // Get user's org membership (use array query to avoid .single() errors)
+  const { data: memberships } = await supabase
     .from('org_members')
     .select('org_id, role, orgs(name)')
-    .eq('user_id', user.id)
-    .single();
+    .eq('user_id', user.id);
 
-  if (!membership) {
+  // If no memberships, redirect to onboarding
+  if (!memberships || memberships.length === 0) {
     redirect('/onboarding');
   }
+
+  // Use the first membership (user's primary org)
+  const membership = memberships[0];
 
   // Get projects for the org
   const { data: projects } = await supabase
     .from('projects')
     .select('*')
-    .eq('org_id', membership.org_id)
+    .eq('org_id', (membership as any).org_id)
     .order('updated_at', { ascending: false });
 
   return (
@@ -57,7 +63,7 @@ export default async function ProjectsPage() {
 
         {projects && projects.length > 0 ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {projects.map((project) => (
+            {projects.map((project: Project) => (
               <Link key={project.id} href={`/projects/${project.id}/setup`}>
                 <Card className="cursor-pointer transition-all hover:border-orange-500/50 hover:shadow-lg">
                   <CardHeader>

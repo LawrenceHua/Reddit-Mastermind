@@ -23,22 +23,69 @@ export type Database = {
         Row: {
           id: string;
           name: string;
+          created_by: string | null;
           created_at: string;
           updated_at: string;
         };
         Insert: {
           id?: string;
           name: string;
+          created_by?: string | null;
           created_at?: string;
           updated_at?: string;
         };
         Update: {
           id?: string;
           name?: string;
+          created_by?: string | null;
           created_at?: string;
           updated_at?: string;
         };
         Relationships: [];
+      };
+      org_invitations: {
+        Row: {
+          id: string;
+          org_id: string;
+          email: string;
+          role: OrgRole;
+          invited_by: string;
+          token: string;
+          expires_at: string;
+          accepted_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          org_id: string;
+          email: string;
+          role?: OrgRole;
+          invited_by: string;
+          token?: string;
+          expires_at?: string;
+          accepted_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          org_id?: string;
+          email?: string;
+          role?: OrgRole;
+          invited_by?: string;
+          token?: string;
+          expires_at?: string;
+          accepted_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'org_invitations_org_id_fkey';
+            columns: ['org_id'];
+            isOneToOne: false;
+            referencedRelation: 'orgs';
+            referencedColumns: ['id'];
+          },
+        ];
       };
       org_members: {
         Row: {
@@ -632,6 +679,18 @@ export type Database = {
           lock_timeout_ms?: number;
         };
         Returns: number;
+      };
+      create_org_with_owner: {
+        Args: {
+          org_name: string;
+        };
+        Returns: { org_id: string; member_id: string }[];
+      };
+      accept_org_invitation: {
+        Args: {
+          invite_token: string;
+        };
+        Returns: { org_id: string; member_id: string }[];
       };
     };
     Enums: {
