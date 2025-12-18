@@ -304,6 +304,7 @@ async function seed() {
       project_id: projectId,
       text: topic,
       active: true,
+      seed_type: 'target_query', // Required field
     });
 
     if (error) {
@@ -364,11 +365,11 @@ async function seed() {
 
     // Create main post content asset
     await supabase.from('content_assets').insert({
-      item_id: itemId,
+      calendar_item_id: itemId,
       version: 1,
       title: post.title,
-      body: post.body,
-      is_current: true,
+      body_md: post.body,
+      status: 'current',
       metadata_json: {
         asset_type: 'post',
         thread_role: 'op',
@@ -385,11 +386,11 @@ async function seed() {
       const commentPersonaId = personaMap[comment.persona];
 
       await supabase.from('content_assets').insert({
-        item_id: itemId,
+        calendar_item_id: itemId,
         version: 1,
         title: null,
-        body: comment.body,
-        is_current: true,
+        body_md: comment.body,
+        status: 'current',
         metadata_json: {
           asset_type: comment.is_op_reply ? 'followup' : 'comment',
           thread_role: comment.is_op_reply ? 'op' : 'commenter',
